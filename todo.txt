@@ -1,0 +1,13 @@
+
+https://pypi.org/project/python-hue-client/
+
+
+https://github.com/pavoni/pywemo
+
+Implement channels – Hue, Wemo, etc.
+Provide switch/lights with channels
+Generalise presence/active poller – so we can tell if TV is on
+light control
+ToD/DoW logic
+if TV is on, and 18:00 < ToD < 03:00 then dim lights
+If 18:00 < ToD < 03:00 then raise lights
