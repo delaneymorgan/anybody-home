@@ -30,6 +30,16 @@ class Periodic(object):
         self.last_time = 0
         return
 
+    def set_period(self, period):
+        self.period = period
+        self.reset()
+        return
+
+    def reset(self):
+        self.start_time = time.time()
+        self.num_periods = 0
+        return
+
     def check(self):
         time_now = time.time()
         elapsed_periods = math.floor((time_now - self.start_time) / self.period)

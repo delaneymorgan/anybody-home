@@ -10,7 +10,6 @@ Loads configuration from config.ini and produces a configuration dictionary.
 www.delaneymorgan.com.au
 """
 
-
 import configparser
 import json
 from enum import Enum
@@ -27,7 +26,8 @@ class Sections(Enum):
 
 # Defines the various required configuration members and their types.
 GENERAL_MEMBERS = {'positive_poll_period': 'float', 'negative_poll_period': 'float'}
-REDIS_MEMBERS = {'host': 'string', 'port': 'integer', 'db_no': 'integer', 'key': 'string'}
+REDIS_MEMBERS = {'host': 'string', 'port': 'integer', 'db_no': 'integer', 'key_detail': 'string',
+                 'key_summary': 'string'}
 DEVICES_MEMBERS = {'monitored_devices': 'dict'}
 
 
@@ -61,8 +61,8 @@ class HomerConfig:
 
     def _read_section(self, settings, section_name, members):
         values = {}
-        for member,type in members.items():
-            values[member] = self._parse_config_entry(settings, section_name, member, type)
+        for member, member_type in members.items():
+            values[member] = self._parse_config_entry(settings, section_name, member, member_type)
         return values
 
     def _parse_config_entry(self, settings, section, member, member_type):

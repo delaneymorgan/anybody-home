@@ -19,12 +19,14 @@ A systemd service is provided for use with Raspbian.  Assuming you have installe
 
 ---
 ### Packages required:
-* gunicorn - webapi framework
+* redis - in-memory database with persistence
 
 ---
 ### Modules required:
 * configparser - .ini file parsing module
+* json - json parser/output
 * pyping - provides network ping service
+* redis - redis interface
 
 &nbsp;&nbsp;&nbsp;&nbsp;`sudo pip install configparser`  
 &nbsp;&nbsp;&nbsp;&nbsp;`sudo pip install gunicorn`  
