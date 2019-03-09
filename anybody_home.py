@@ -2,7 +2,7 @@
 # coding=utf-8
 
 """
-Tracker - Mobile device tracker
+anybody-home - A service to register if a user(s) is home or not
 
 NOTE: iPhones only sporadically answer pings when on WiFi as (I presume) a power-saving measure
       If an iPhone fails to answer a ping for > 60sec, it's probably not in WiFi range anymore
@@ -22,7 +22,7 @@ import redis
 import time
 
 from periodic import Periodic
-from config import TrackerConfig
+from config import AnybodyHomeConfig
 from notifier import Notifier
 from sce import StateChartEngine, FiniteState
 
@@ -75,9 +75,9 @@ class Pinger(object):
 # =============================================================================
 
 
-class TrackerState(FiniteState):
+class AnybodyHomeState(FiniteState):
     def __init__(self, state_id, notifier=None, evergreen_vars=None):
-        super(TrackerState, self).__init__(state_id, notifier, evergreen_vars)
+        super(AnybodyHomeState, self).__init__(state_id, notifier, evergreen_vars)
         self.config = evergreen_vars["config"]
         self.pinger = evergreen_vars["pinger"]
         self.poll_check = None
@@ -89,15 +89,15 @@ class TrackerState(FiniteState):
 
     def poll(self, current_data):
         roll_call = {}
-        any_detected = False
+        anybody_home = False
         monitored_devices = self.config.device_details()["monitored_devices"]
         for name, address in monitored_devices.items():
             response = self.pinger.ping(address)
             roll_call[name] = response
             if response:
-                any_detected = True
+                anybody_home = True
         current_data["roll_call"] = roll_call
-        current_data["any_detected"] = any_detected
+        current_data["anybody_home"] = anybody_home
         return
 
 
@@ -105,7 +105,7 @@ class TrackerState(FiniteState):
 
 
 # noinspection PyMethodMayBeStatic,PyMethodMayBeStatic
-class MaybeState(TrackerState):
+class MaybeState(AnybodyHomeState):
     # noinspection PyDictCreation
     def __init__(self, state_id, notifier=None, evergreen_vars=None):
         super(MaybeState, self).__init__(state_id, notifier, evergreen_vars)
@@ -138,7 +138,7 @@ class MaybeState(TrackerState):
 
 
 # noinspection PyMethodMayBeStatic
-class AwayState(TrackerState):
+class AwayState(AnybodyHomeState):
     # noinspection PyDictCreation
     def __init__(self, state_id, notifier=None, evergreen_vars=None):
         super(AwayState, self).__init__(state_id, notifier, evergreen_vars)
@@ -150,7 +150,7 @@ class AwayState(TrackerState):
 
     def entry(self, current_data=None):
         super(AwayState, self).entry(current_data)
-        current_data["home"] = False
+        current_data["anybody_home"] = False
         poll_period = self.config.polling_details()["negative_period"]
         self.poll_check = Periodic(poll_period, self.poll, "HomeState.poll")
         return
@@ -172,7 +172,7 @@ class AwayState(TrackerState):
 
 
 # noinspection PyMethodMayBeStatic
-class HomeState(TrackerState):
+class HomeState(AnybodyHomeState):
     # noinspection PyDictCreation
     def __init__(self, state_id, notifier=None, evergreen_vars=None):
         super(HomeState, self).__init__(state_id, notifier, evergreen_vars)
@@ -183,13 +183,13 @@ class HomeState(TrackerState):
 
     def entry(self, current_data=None):
         super(HomeState, self).entry(current_data)
-        current_data["home"] = True
+        current_data["anybody_home"] = True
         poll_period = self.config.polling_details()["positive_period"]
         self.poll_check = Periodic(poll_period, self.poll, "HomeState.poll")
         return
 
     def check_maybe(self, current_data=None):
-        if current_data["any_detected"]:
+        if current_data["anybody_home"]:
             return True
         return False
 
@@ -208,7 +208,7 @@ def arg_parser():
 
     :return: the parsed command line arguments
     """
-    parser = argparse.ArgumentParser(description='Tracker.')
+    parser = argparse.ArgumentParser(description='anybody-home.  A service to register if a user is home.')
     parser.add_argument("-v", "--verbose", help="verbose mode", action="store_true")
     parser.add_argument("-d", "--diagnostic", help="diagnostic mode (includes verbose)", action="store_true")
     parser.add_argument("-t", "--test", help="use fake pings for simulation", action="store_true")
@@ -233,14 +233,14 @@ def run_state_machine(sce, config, notifier):
     terminated = False
     redis_info = config.redis_details()
     rdb = redis.StrictRedis(host=redis_info["host"], port=redis_info["port"], db=redis_info["db_no"])
-    app_data = dict(any_detected=False, roll_call={}, home=False)
+    app_data = dict(roll_call={}, anybody_home=False)
     sce.init(AppStates.MAYBE)
     iteration_no = 0
     while not terminated:
         notifier.note("Iteration: %d: appData: %s, state: %s" % (iteration_no, json.dumps(app_data), sce.state_names()))
         terminated = sce.iterate(app_data)
         rdb.set(redis_info["key_detail"], json.dumps(app_data["roll_call"]))
-        rdb.set(redis_info["key_summary"], json.dumps(app_data["any_detected"]))
+        rdb.set(redis_info["key_summary"], json.dumps(app_data["anybody_home"]))
         iteration_no += 1
         time.sleep(0.5)
     return
@@ -252,7 +252,7 @@ def run_state_machine(sce, config, notifier):
 def main():
     args = arg_parser()
     notifier = Notifier(args)
-    config = TrackerConfig(CONFIG_FILENAME)
+    config = AnybodyHomeConfig(CONFIG_FILENAME)
     pinger = Pinger(args, config, notifier)
     sce = StateChartEngine(STATE_CHART, notifier, evergreen_vars=dict(pinger=pinger, config=config))
     run_state_machine(sce, config, notifier)
