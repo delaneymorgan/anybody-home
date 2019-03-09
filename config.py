@@ -2,7 +2,7 @@
 # coding=utf-8
 
 """
-Anybody Home Configuration Parser
+Herald Configuration Parser
 
 Loads configuration from config.ini and produces a configuration dictionary.
 
@@ -34,7 +34,7 @@ DEVICES_MEMBERS = {'monitored_devices': 'dict'}
 # =============================================================================
 
 
-class AnybodyHomeConfig:
+class HeraldConfig:
     config = {}
 
     # A list of parsers for given data types. Note that many are non-standard types that
@@ -82,5 +82,5 @@ class AnybodyHomeConfig:
 
 
 if __name__ == "__main__":
-    cfg = AnybodyHomeConfig()
+    cfg = HeraldConfig()
     print(json.dumps(cfg.config, indent=4))

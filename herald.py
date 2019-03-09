@@ -2,7 +2,7 @@
 # coding=utf-8
 
 """
-anybody-home - A service to register if a user(s) is home or not
+herald - A service to announce a user's presence
 
 NOTE: iPhones only sporadically answer pings when on WiFi as (I presume) a power-saving measure
       If an iPhone fails to answer a ping for > 60sec, it's probably not in WiFi range anymore
@@ -22,7 +22,7 @@ import redis
 import time
 
 from periodic import Periodic
-from config import AnybodyHomeConfig
+from config import HeraldConfig
 from notifier import Notifier
 from sce import StateChartEngine, FiniteState
 
@@ -75,9 +75,9 @@ class Pinger(object):
 # =============================================================================
 
 
-class AnybodyHomeState(FiniteState):
+class HeraldState(FiniteState):
     def __init__(self, state_id, notifier=None, evergreen_vars=None):
-        super(AnybodyHomeState, self).__init__(state_id, notifier, evergreen_vars)
+        super(HeraldState, self).__init__(state_id, notifier, evergreen_vars)
         self.config = evergreen_vars["config"]
         self.pinger = evergreen_vars["pinger"]
         self.poll_check = None
@@ -105,7 +105,7 @@ class AnybodyHomeState(FiniteState):
 
 
 # noinspection PyMethodMayBeStatic,PyMethodMayBeStatic
-class MaybeState(AnybodyHomeState):
+class MaybeState(HeraldState):
     # noinspection PyDictCreation
     def __init__(self, state_id, notifier=None, evergreen_vars=None):
         super(MaybeState, self).__init__(state_id, notifier, evergreen_vars)
@@ -138,7 +138,7 @@ class MaybeState(AnybodyHomeState):
 
 
 # noinspection PyMethodMayBeStatic
-class AwayState(AnybodyHomeState):
+class AwayState(HeraldState):
     # noinspection PyDictCreation
     def __init__(self, state_id, notifier=None, evergreen_vars=None):
         super(AwayState, self).__init__(state_id, notifier, evergreen_vars)
@@ -172,7 +172,7 @@ class AwayState(AnybodyHomeState):
 
 
 # noinspection PyMethodMayBeStatic
-class HomeState(AnybodyHomeState):
+class HomeState(HeraldState):
     # noinspection PyDictCreation
     def __init__(self, state_id, notifier=None, evergreen_vars=None):
         super(HomeState, self).__init__(state_id, notifier, evergreen_vars)
@@ -208,7 +208,7 @@ def arg_parser():
 
     :return: the parsed command line arguments
     """
-    parser = argparse.ArgumentParser(description='anybody-home.  A service to register if a user is home.')
+    parser = argparse.ArgumentParser(description="herald.  A service to announce a user's presence.")
     parser.add_argument("-v", "--verbose", help="verbose mode", action="store_true")
     parser.add_argument("-d", "--diagnostic", help="diagnostic mode (includes verbose)", action="store_true")
     parser.add_argument("-t", "--test", help="use fake pings for simulation", action="store_true")
@@ -252,7 +252,7 @@ def run_state_machine(sce, config, notifier):
 def main():
     args = arg_parser()
     notifier = Notifier(args)
-    config = AnybodyHomeConfig(CONFIG_FILENAME)
+    config = HeraldConfig(CONFIG_FILENAME)
     pinger = Pinger(args, config, notifier)
     sce = StateChartEngine(STATE_CHART, notifier, evergreen_vars=dict(pinger=pinger, config=config))
     run_state_machine(sce, config, notifier)
