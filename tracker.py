@@ -13,17 +13,18 @@ www.delaneymorgan.com.au
 """
 
 import argparse
+from enum import Enum
 import json
 import os
 import pyping
 import random
 import redis
-import sys
-import threading
 import time
 
 from periodic import Periodic
-from config import HomerConfig
+from config import TrackerConfig
+from notifier import Notifier
+from sce import StateChartEngine, FiniteState
 
 __VERSION__ = "1.0.0"
 
@@ -36,98 +37,29 @@ USE_PYPING = False
 # =============================================================================
 
 
-class Notifier(object):
-    def __init__(self, args):
-        self._args = args
-        return
-
-    @staticmethod
-    def _inform(string):
-        print("%s: %s" % (time.strftime("%Y/%m/%d %H:%M:%S"), string))
-        sys.stdout.flush()  # force print to flush
-        return
-
-    def note(self, string):
-        if self._args.verbose or self._args.diagnostic:
-            self._inform(string)
-        return
-
-    def warning(self, string):
-        self._inform("Warning: %s" % string)
-        return
-
-    def error(self, string):
-        self._inform("Error: %s" % string)
-        return
-
-    def diagnostic(self, string):
-        if self._args.diagnostic:
-            self._inform("Diagnostic: %s" % string)
-        return
-
-    def fatal(self, string):
-        self._inform("Fatal: %s" % string)
-        # noinspection PyProtectedMember
-        os._exit(1)
-        return
+class AppStates(Enum):
+    MAYBE = 0  # Special-case state - used to terminate state machine (until I think of something nicer)
+    AWAY = 1
+    HOME = 2
 
 
 # =============================================================================
 
 
-class Tracker(threading.Thread):
-    def __init__(self, args, config, notifier):
-        super(Tracker, self).__init__()
+class Pinger(object):
+    def __init__(self, args, config, notifier=None):
+        super(Pinger, self).__init__()
         self._args = args
         self._config = config
-        self._monitored_devices = config.devices_details()["monitored_devices"]
         self._notifer = notifier
-        positive_poll_period = config.general_details()["positive_poll_period"]
-        negative_poll_period = config.general_details()["negative_poll_period"]
-        self._poll = Periodic(negative_poll_period, self.poll_devices, "poll_devices", notifier=notifier)
-        redis_info = config.redis_details()
-        self._rdb = redis.StrictRedis(host=redis_info["host"], port=redis_info["port"], db=redis_info["db_no"])
-        self._roll_call = {}
-        return
-
-    def any_detected(self):
-        for thisDevice, presence in self._roll_call.items():
-            if presence:
-                return True
-        return False
-
-    def poll_devices(self):
-        roll_call = {}
-        redis_info = config.redis_details()
-        previously_detected = self.any_detected()
-        any_detected = False
-        for name, address in self._monitored_devices.items():
-            self._notifer.diagnostic("pinging %s at %s" % (name, address))
-            found = self.ping(address)
-            if found:
-                any_detected = True
-                roll_call[name] = True
-                self._notifer.note("%s found" % name)
-            else:
-                roll_call[name] = False
-                self._notifer.note("%s missing" % name)
-                if previously_detected:
-                    self._poll.reset()
-
-        # set up next poll
-        if any_detected and not previously_detected:
-            self._poll.set_period(config.general_details()["positive_poll_period"])
-        elif not any_detected and previously_detected:
-            self._poll.set_period(config.general_details()["negative_poll_period"])
-
-        self._roll_call = roll_call
-        self._rdb.set(redis_info["key_detail"], json.dumps(roll_call))
-        self._rdb.set(redis_info["key_summary"], json.dumps(any_detected))
+        self.lastResult = False
         return
 
     def ping(self, ip_address):
+        if self._notifer:
+            self._notifer.diagnostic("pinging: %s" % ip_address)
         # NOTE: ping requires root access.  Fake it during development with a random#
-        if hasattr(args, 'test') and args.test:
+        if hasattr(self._args, 'test') and self._args.test:
             found = (random.randint(0, 3) == 3)
         elif USE_PYPING:
             response = pyping.ping(ip_address)
@@ -135,19 +67,136 @@ class Tracker(threading.Thread):
         else:
             response = os.system("ping -c i %s" % ip_address)
             found = (response == 0)
+        if self._notifer:
+            self._notifer.diagnostic("pinged: %s - %s" % (ip_address, found))
         return found
 
-    def roll_call(self):
-        return self._roll_call
 
-    def check(self):
-        self._poll.check()
+# =============================================================================
+
+
+class TrackerState(FiniteState):
+    def __init__(self, state_id, notifier=None, evergreen_vars=None):
+        super(TrackerState, self).__init__(state_id, notifier, evergreen_vars)
+        self.config = evergreen_vars["config"]
+        self.pinger = evergreen_vars["pinger"]
+        self.poll_check = None
         return
 
-    def run(self):
-        while gRunningFlag:
-            self.check()
+    def exit(self, current_data=None):
+        del self.poll_check
         return
+
+    def poll(self, current_data):
+        roll_call = {}
+        any_detected = False
+        monitored_devices = self.config.device_details()["monitored_devices"]
+        for name, address in monitored_devices.items():
+            response = self.pinger.ping(address)
+            roll_call[name] = response
+            if response:
+                any_detected = True
+        current_data["roll_call"] = roll_call
+        current_data["any_detected"] = any_detected
+        return
+
+
+# =============================================================================
+
+
+# noinspection PyMethodMayBeStatic,PyMethodMayBeStatic
+class MaybeState(TrackerState):
+    # noinspection PyDictCreation
+    def __init__(self, state_id, notifier=None, evergreen_vars=None):
+        super(MaybeState, self).__init__(state_id, notifier, evergreen_vars)
+        checks = list()
+        checks.append(dict(stateID=AppStates.HOME, check=self.check_home))
+        checks.append(dict(stateID=AppStates.AWAY, check=self.check_away))
+        self.set_transitions(checks)
+        return
+
+    def entry(self, current_data=None):
+        super(MaybeState, self).entry(current_data)
+        poll_period = self.config.polling_details()["maybe_period"]
+        self.poll_check = Periodic(poll_period, self.poll, "HomeState.poll")
+        return
+
+    def check_away(self, current_data=None):
+        _ = current_data
+        return True
+
+    def check_home(self, current_data=None):
+        _ = current_data
+        return True
+
+    def steady(self, current_data=None):
+        self.diagnostic("%s steady" % self._state_id.name)
+        return self.transitioning(current_data)
+
+
+# =============================================================================
+
+
+# noinspection PyMethodMayBeStatic
+class AwayState(TrackerState):
+    # noinspection PyDictCreation
+    def __init__(self, state_id, notifier=None, evergreen_vars=None):
+        super(AwayState, self).__init__(state_id, notifier, evergreen_vars)
+        checks = list()
+        checks.append(dict(stateID=AppStates.HOME, check=self.check_home))
+        checks.append(dict(stateID=AppStates.MAYBE, check=self.check_maybe))
+        self.set_transitions(checks)
+        return
+
+    def entry(self, current_data=None):
+        super(AwayState, self).entry(current_data)
+        current_data["home"] = False
+        poll_period = self.config.polling_details()["negative_period"]
+        self.poll_check = Periodic(poll_period, self.poll, "HomeState.poll")
+        return
+
+    def check_maybe(self, current_data=None):
+        _ = current_data
+        return True
+
+    def check_home(self, current_data=None):
+        _ = current_data
+        return True
+
+    def steady(self, current_data=None):
+        self.diagnostic("%s steady" % self._state_id.name)
+        return self.transitioning(current_data)
+
+
+# =============================================================================
+
+
+# noinspection PyMethodMayBeStatic
+class HomeState(TrackerState):
+    # noinspection PyDictCreation
+    def __init__(self, state_id, notifier=None, evergreen_vars=None):
+        super(HomeState, self).__init__(state_id, notifier, evergreen_vars)
+        checks = list()
+        checks.append(dict(stateID=AppStates.MAYBE, check=self.check_maybe))
+        self.set_transitions(checks)
+        return
+
+    def entry(self, current_data=None):
+        super(HomeState, self).entry(current_data)
+        current_data["home"] = True
+        poll_period = self.config.polling_details()["positive_period"]
+        self.poll_check = Periodic(poll_period, self.poll, "HomeState.poll")
+        return
+
+    def check_maybe(self, current_data=None):
+        if current_data["any_detected"]:
+            return True
+        return False
+
+    def steady(self, current_data=None):
+        self.diagnostic("%s steady" % self._state_id.name)
+        self.poll_check.check(current_data)
+        return self.transitioning(current_data)
 
 
 # =============================================================================
@@ -168,22 +217,47 @@ def arg_parser():
     return args
 
 
-if __name__ == "__main__":
-    print("Tracker start")
+# =============================================================================
+
+
+STATE_CHART = dict()
+STATE_CHART[AppStates.MAYBE] = dict(stateClass=MaybeState)
+STATE_CHART[AppStates.AWAY] = dict(stateClass=AwayState)
+STATE_CHART[AppStates.HOME] = dict(stateClass=HomeState)
+
+
+# =============================================================================
+
+
+def run_state_machine(sce, config, notifier):
+    terminated = False
+    redis_info = config.redis_details()
+    rdb = redis.StrictRedis(host=redis_info["host"], port=redis_info["port"], db=redis_info["db_no"])
+    app_data = dict(any_detected=False, roll_call={}, home=False)
+    sce.init(AppStates.MAYBE)
+    iteration_no = 0
+    while not terminated:
+        notifier.note("Iteration: %d: appData: %s, state: %s" % (iteration_no, json.dumps(app_data), sce.state_names()))
+        terminated = sce.iterate(app_data)
+        rdb.set(redis_info["key_detail"], json.dumps(app_data["roll_call"]))
+        rdb.set(redis_info["key_summary"], json.dumps(app_data["any_detected"]))
+        iteration_no += 1
+        time.sleep(0.5)
+    return
+
+
+# =============================================================================
+
+
+def main():
     args = arg_parser()
     notifier = Notifier(args)
-    config = HomerConfig(CONFIG_FILENAME)
-    # noinspection PyTypeChecker
-    tracker = Tracker(args, config, notifier)
-    if USE_THREADING:
-        tracker.start()
-    else:
-        try:
-            while True:
-                tracker.check()
-                # notifier.note("roll call: %s" % tracker.roll_call())
-                time.sleep(1)
-        except KeyboardInterrupt:
-            gRunningFlag = False
-            pass
-    print("Tracker end")
+    config = TrackerConfig(CONFIG_FILENAME)
+    pinger = Pinger(args, config, notifier)
+    sce = StateChartEngine(STATE_CHART, notifier, evergreen_vars=dict(pinger=pinger, config=config))
+    run_state_machine(sce, config, notifier)
+    return
+
+
+if __name__ == "__main__":
+    main()

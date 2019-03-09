@@ -40,7 +40,7 @@ class Periodic(object):
         self.num_periods = 0
         return
 
-    def check(self):
+    def check(self, params=None):
         time_now = time.time()
         elapsed_periods = math.floor((time_now - self.start_time) / self.period)
         remainder = (time_now - self.start_time) % self.period
@@ -53,7 +53,7 @@ class Periodic(object):
                     self.notifier.diagnostic("doing %s" % self.name)
                 else:
                     print("doing %s" % self.name)
-            self.task()
+            self.task(params)
             return time_left
         return time_left
 
@@ -94,12 +94,12 @@ class Thread2(threading.Thread):
         self.periodic3 = Periodic(5, self.do_task3)
         return
 
-    def do_task2(self):
+    def do_task2(self, params=None):
         elapsed = time.time() - self.start_time
         print("doTask2: %5.1f" % elapsed)
         return
 
-    def do_task3(self):
+    def do_task3(self, params=None):
         elapsed = time.time() - self.start_time
         print("doTask3: %5.1f" % elapsed)
         return

@@ -19,13 +19,13 @@ from enum import Enum
 
 
 class Sections(Enum):
-    GENERAL = 1
+    POLLING = 1
     REDIS = 2
     DEVICES = 3
 
 
 # Defines the various required configuration members and their types.
-GENERAL_MEMBERS = {'positive_poll_period': 'float', 'negative_poll_period': 'float'}
+POLLING_MEMBERS = {'positive_period': 'float', 'negative_period': 'float', 'maybe_period': 'float'}
 REDIS_MEMBERS = {'host': 'string', 'port': 'integer', 'db_no': 'integer', 'key_detail': 'string',
                  'key_summary': 'string'}
 DEVICES_MEMBERS = {'monitored_devices': 'dict'}
@@ -34,7 +34,7 @@ DEVICES_MEMBERS = {'monitored_devices': 'dict'}
 # =============================================================================
 
 
-class HomerConfig:
+class TrackerConfig:
     config = {}
 
     # A list of parsers for given data types. Note that many are non-standard types that
@@ -54,7 +54,7 @@ class HomerConfig:
         settings = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation())
         settings.read(self.filename)
 
-        self.config[Sections.GENERAL] = self._read_section(settings, Sections.GENERAL.name, GENERAL_MEMBERS)
+        self.config[Sections.POLLING] = self._read_section(settings, Sections.POLLING.name, POLLING_MEMBERS)
         self.config[Sections.REDIS] = self._read_section(settings, Sections.REDIS.name, REDIS_MEMBERS)
         self.config[Sections.DEVICES] = self._read_section(settings, Sections.DEVICES.name, DEVICES_MEMBERS)
         return
@@ -68,13 +68,13 @@ class HomerConfig:
     def _parse_config_entry(self, settings, section, member, member_type):
         return self.configTypeParsers[member_type](self, settings, section, member)
 
-    def general_details(self):
-        return self.config[Sections.GENERAL]
+    def polling_details(self):
+        return self.config[Sections.POLLING]
 
     def redis_details(self):
         return self.config[Sections.REDIS]
 
-    def devices_details(self):
+    def device_details(self):
         return self.config[Sections.DEVICES]
 
 
@@ -82,5 +82,5 @@ class HomerConfig:
 
 
 if __name__ == "__main__":
-    cfg = HomerConfig()
+    cfg = TrackerConfig()
     print(json.dumps(cfg.config, indent=4))
